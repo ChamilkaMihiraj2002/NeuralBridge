@@ -220,6 +220,43 @@ textarea {
   background: transparent;
 }
 
+.markdown-code {
+  color: var(--text-primary);
+}
+
+.markdown-code .token-keyword {
+  color: #ff7a90;
+}
+
+.markdown-code .token-string {
+  color: #7cd992;
+}
+
+.markdown-code .token-comment {
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  font-style: italic;
+}
+
+.markdown-code .token-number {
+  color: #7fb3ff;
+}
+
+.markdown-code .token-boolean {
+  color: #c792ea;
+}
+
+.markdown-code .token-function {
+  color: #ffd166;
+}
+
+.markdown-code .token-property {
+  color: #56cfe1;
+}
+
+.markdown-code .token-operator {
+  color: #f4a261;
+}
+
 .markdown-inline-code {
   background: var(--bg-surface-hover);
   border-radius: 4px;

@@ -50,6 +50,20 @@ type MarkdownSegment =
   | { type: "text"; content: string }
   | { type: "code"; content: string; language: string };
 
+type SyntaxToken = {
+  type:
+    | "plain"
+    | "keyword"
+    | "string"
+    | "comment"
+    | "number"
+    | "operator"
+    | "boolean"
+    | "function"
+    | "property";
+  value: string;
+};
+
 const DEFAULT_MODEL = "llama3.2:3b";
 const DEFAULT_URL = "https://tragedy-linseed-handclap.ngrok.app";
 
@@ -63,6 +77,36 @@ const suggestedModels = ["llama3.2:3b", "llama3.1:8b", "qwen2.5:7b", "mistral:7b
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function TitleLogo({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className={cn(
+        "relative shrink-0 overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--border-color)_70%,transparent)] bg-[var(--bg-primary)] shadow-[var(--shadow-elevation)]",
+        compact ? "h-9 w-9" : "h-10 w-10"
+      )}>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(11,87,208,0.22),transparent_55%),radial-gradient(circle_at_bottom_right,rgba(217,101,112,0.18),transparent_58%)]" />
+        <span className="absolute left-[7px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[var(--accent-color)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-color)_14%,transparent)]" />
+        <span className="absolute right-[7px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#d96570] shadow-[0_0_0_4px_rgba(217,101,112,0.14)]" />
+        <span className="absolute left-1/2 top-1/2 h-[2px] w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[linear-gradient(90deg,var(--accent-color),#d96570)]" />
+        <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--text-primary)]" />
+      </div>
+      <div className="min-w-0">
+        <div className={cn(
+          "truncate font-semibold tracking-[0.02em] text-[var(--text-primary)]",
+          compact ? "text-base" : "text-lg md:text-sm"
+        )}>
+          Neural Bridge
+        </div>
+        {!compact && (
+          <div className="truncate text-[11px] uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
+            Local AI Workspace
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function readStoredSettings() {
@@ -180,18 +224,288 @@ function renderInlineMarkdown(content: string) {
   });
 }
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  js: "javascript",
+  jsx: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  py: "python",
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  yml: "yaml",
+  html: "markup",
+  xml: "markup",
+};
+
+const LANGUAGE_KEYWORDS: Record<string, string[]> = {
+  javascript: [
+    "as", "async", "await", "break", "case", "catch", "class", "const", "continue",
+    "default", "delete", "do", "else", "export", "extends", "finally", "for", "from",
+    "function", "if", "import", "in", "instanceof", "let", "new", "of", "return",
+    "static", "super", "switch", "this", "throw", "try", "typeof", "var", "void",
+    "while", "yield",
+  ],
+  typescript: [
+    "abstract", "as", "async", "await", "break", "case", "catch", "class", "const",
+    "continue", "declare", "default", "delete", "do", "else", "enum", "export",
+    "extends", "finally", "for", "from", "function", "if", "implements", "import",
+    "in", "infer", "instanceof", "interface", "keyof", "let", "namespace", "new",
+    "of", "private", "protected", "public", "readonly", "return", "satisfies",
+    "static", "super", "switch", "this", "throw", "try", "type", "typeof", "var",
+    "void", "while",
+  ],
+  python: [
+    "and", "as", "assert", "async", "await", "break", "class", "continue", "def",
+    "del", "elif", "else", "except", "finally", "for", "from", "global", "if",
+    "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+    "return", "try", "while", "with", "yield",
+  ],
+  bash: [
+    "case", "do", "done", "elif", "else", "esac", "fi", "for", "function", "if",
+    "in", "select", "then", "time", "until", "while",
+  ],
+  json: [],
+  css: [
+    "@media", "@supports", "from", "important", "keyframes", "to", "var",
+  ],
+  sql: [
+    "add", "alter", "and", "as", "asc", "between", "by", "case", "create", "delete",
+    "desc", "distinct", "drop", "else", "end", "from", "group", "having", "in",
+    "insert", "into", "join", "left", "like", "limit", "not", "null", "on", "or",
+    "order", "outer", "right", "select", "set", "table", "then", "union", "update",
+    "values", "when", "where",
+  ],
+  yaml: [],
+};
+
+function escapeForRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeLanguage(language: string) {
+  const lowered = language.trim().toLowerCase();
+  return LANGUAGE_ALIASES[lowered] ?? lowered;
+}
+
+function getTokenPattern(language: string) {
+  const normalized = normalizeLanguage(language);
+  const keywords = LANGUAGE_KEYWORDS[normalized] ?? LANGUAGE_KEYWORDS.javascript;
+  const keywordPattern =
+    keywords.length > 0
+      ? `\\b(?:${keywords.map(escapeForRegex).join("|")})\\b`
+      : null;
+
+  if (normalized === "markup") {
+    return /<!--[\s\S]*?-->|<\/?[A-Za-z][^\s/>]*|\/?>|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b[A-Za-z:-]+(?==)/g;
+  }
+
+  if (normalized === "json") {
+    return /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?\b/g;
+  }
+
+  if (normalized === "python") {
+    return new RegExp(
+      [
+        "#.*$",
+        "\"\"\"[\\s\\S]*?\"\"\"",
+        "'''[\\s\\S]*?'''",
+        "\"(?:\\\\.|[^\"\\\\])*\"",
+        "'(?:\\\\.|[^'\\\\])*'",
+        keywordPattern,
+        "\\b(?:True|False|None)\\b",
+        "\\b\\d+(?:\\.\\d+)?\\b",
+        "(?<!\\.)\\b[A-Za-z_]\\w*(?=\\()",
+      ]
+        .filter(Boolean)
+        .join("|"),
+      "gm",
+    );
+  }
+
+  if (normalized === "bash") {
+    return new RegExp(
+      [
+        "#.*$",
+        "\"(?:\\\\.|[^\"\\\\])*\"",
+        "'(?:\\\\.|[^'\\\\])*'",
+        "`(?:\\\\.|[^`\\\\])*`",
+        "\\$\\{[^}]+\\}",
+        keywordPattern,
+        "\\b(?:true|false)\\b",
+        "\\b\\d+(?:\\.\\d+)?\\b",
+      ]
+        .filter(Boolean)
+        .join("|"),
+      "gm",
+    );
+  }
+
+  if (normalized === "css") {
+    return new RegExp(
+      [
+        "/\\*[\\s\\S]*?\\*/",
+        "\"(?:\\\\.|[^\"\\\\])*\"",
+        "'(?:\\\\.|[^'\\\\])*'",
+        keywordPattern,
+        "#[0-9a-fA-F]{3,8}\\b",
+        "\\b\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|%)?\\b",
+        "(?<![\\w-])[A-Za-z-]+(?=\\s*:)",
+      ]
+        .filter(Boolean)
+        .join("|"),
+      "gm",
+    );
+  }
+
+  if (normalized === "sql") {
+    return new RegExp(
+      [
+        "--.*$",
+        "/\\*[\\s\\S]*?\\*/",
+        "\"(?:\\\\.|[^\"\\\\])*\"",
+        "'(?:\\\\.|[^'\\\\])*'",
+        keywordPattern,
+        "\\b(?:true|false|null)\\b",
+        "\\b\\d+(?:\\.\\d+)?\\b",
+      ]
+        .filter(Boolean)
+        .join("|"),
+      "gmi",
+    );
+  }
+
+  if (normalized === "yaml") {
+    return /#.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:true|false|null)\b|\b\d+(?:\.\d+)?\b|(?<!\S)[A-Za-z0-9_-]+(?=\s*:)/gm;
+  }
+
+  return new RegExp(
+    [
+      "//.*$",
+      "/\\*[\\s\\S]*?\\*/",
+      "\"(?:\\\\.|[^\"\\\\])*\"",
+      "'(?:\\\\.|[^'\\\\])*'",
+      "`(?:\\\\.|[^`\\\\])*`",
+      keywordPattern,
+      "\\b(?:true|false|null|undefined)\\b",
+      "\\b\\d+(?:\\.\\d+)?\\b",
+      "(?<!\\.)\\b[A-Za-z_$][\\w$]*(?=\\()",
+    ]
+      .filter(Boolean)
+      .join("|"),
+    "gm",
+  );
+}
+
+function getTokenType(match: string, language: string): SyntaxToken["type"] {
+  const normalized = normalizeLanguage(language);
+
+  if (
+    match.startsWith("//") ||
+    match.startsWith("/*") ||
+    match.startsWith("#") ||
+    match.startsWith("--") ||
+    match.startsWith("<!--")
+  ) {
+    return "comment";
+  }
+
+  if (
+    match.startsWith("\"") ||
+    match.startsWith("'") ||
+    match.startsWith("`") ||
+    match.startsWith("\"\"\"") ||
+    match.startsWith("'''")
+  ) {
+    return normalized === "json" && /"\s*:$/m.test(match) ? "property" : "string";
+  }
+
+  if (/^-?\d/.test(match) || /^#[0-9a-fA-F]{3,8}\b/.test(match)) {
+    return "number";
+  }
+
+  if (
+    /^(true|false|null|undefined|True|False|None)$/i.test(match) ||
+    match === "${"
+  ) {
+    return "boolean";
+  }
+
+  if (normalized === "markup") {
+    if (/^<\/?[A-Za-z]/.test(match) || match === "/>" || match === ">") {
+      return "keyword";
+    }
+
+    return "property";
+  }
+
+  if (normalized === "css" && /^[A-Za-z-]+$/.test(match)) {
+    return "property";
+  }
+
+  const keywords = LANGUAGE_KEYWORDS[normalized] ?? LANGUAGE_KEYWORDS.javascript;
+  if (keywords.some((keyword) => keyword.toLowerCase() === match.toLowerCase())) {
+    return "keyword";
+  }
+
+  if (/^[A-Za-z_$][\w$]*$/.test(match)) {
+    return "function";
+  }
+
+  return "plain";
+}
+
+function tokenizeCode(content: string, language: string): SyntaxToken[] {
+  const tokenPattern = getTokenPattern(language);
+  const tokens: SyntaxToken[] = [];
+  let lastIndex = 0;
+
+  for (const match of content.matchAll(tokenPattern)) {
+    const value = match[0];
+    const index = match.index ?? 0;
+
+    if (index > lastIndex) {
+      tokens.push({ type: "plain", value: content.slice(lastIndex, index) });
+    }
+
+    tokens.push({
+      type: getTokenType(value, language),
+      value,
+    });
+
+    lastIndex = index + value.length;
+  }
+
+  if (lastIndex < content.length) {
+    tokens.push({ type: "plain", value: content.slice(lastIndex) });
+  }
+
+  return tokens.length > 0 ? tokens : [{ type: "plain", value: content }];
+}
+
 function renderMarkdown(content: string) {
   const segments = parseMarkdownSegments(content);
 
   return segments.map((segment, segmentIndex) => {
     if (segment.type === "code") {
+      const tokens = tokenizeCode(segment.content, segment.language);
+
       return (
         <div key={segmentIndex} className="markdown-code-block">
           <div className="markdown-code-header">
             <span>{segment.language || "code"}</span>
           </div>
           <pre>
-            <code className="text-[var(--text-primary)]">{segment.content}</code>
+            <code className="markdown-code">
+              {tokens.map((token, tokenIndex) => (
+                <span
+                  key={`${segmentIndex}-${tokenIndex}`}
+                  className={token.type === "plain" ? undefined : `token-${token.type}`}
+                >
+                  {token.value}
+                </span>
+              ))}
+            </code>
           </pre>
         </div>
       );
@@ -656,7 +970,7 @@ export default function ChatInterface() {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <span className="font-semibold text-[var(--text-primary)] text-lg md:text-sm tracking-wide">Neural Bridge</span>
+            <TitleLogo />
           </div>
 
           <button
@@ -745,56 +1059,8 @@ export default function ChatInterface() {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <div className="relative">
-            <button
-              onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-[var(--bg-surface-hover)] cursor-pointer text-[var(--text-secondary)] transition-colors"
-            >
-              <span className="text-lg font-medium tracking-tight text-[var(--text-secondary)]">Neural Bridge</span>
-              <ChevronDown className="h-4 w-4 opacity-70" />
-            </button>
-
-            {isModelDropdownOpen && (
-              <>
-                <div 
-                  className="fixed inset-0 z-40" 
-                  onClick={() => setIsModelDropdownOpen(false)}
-                />
-                <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-xl shadow-lg z-50 py-2">
-                  <div className="px-3 py-2 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-                    Select Model
-                  </div>
-                  {models.map((model) => (
-                    <button
-                      key={model}
-                      onClick={() => {
-                        handleModelChange(model);
-                        setIsModelDropdownOpen(false);
-                      }}
-                      className={cn(
-                        "w-full text-left px-4 py-2 text-sm transition-colors",
-                        selectedModel === model 
-                          ? "bg-[var(--accent-bg)] text-[var(--accent-color)] font-medium" 
-                          : "text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
-                      )}
-                    >
-                      {model}
-                    </button>
-                  ))}
-                  <div className="border-t border-[var(--border-color)] mt-2 pt-2">
-                    <button
-                      onClick={() => {
-                         setIsModelDropdownOpen(false);
-                         setIsSettingsOpen(true);
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-hover)] transition-colors"
-                    >
-                      Manage models
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+          <div className="px-3 py-1.5">
+            <TitleLogo compact />
           </div>
         </header>
 
@@ -960,6 +1226,59 @@ export default function ChatInterface() {
               />
 
               <div className="shrink-0 pb-1.5 pr-1.5 flex items-center gap-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                    className="flex h-9 items-center gap-2 rounded-full px-2 text-sm text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                    title="Select model"
+                  >
+                    <span className="max-w-[120px] truncate">{selectedModel}</span>
+                    <ChevronDown className="h-4 w-4 opacity-70" />
+                  </button>
+
+                  {isModelDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setIsModelDropdownOpen(false)}
+                      />
+                      <div className="absolute bottom-full right-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] py-2 shadow-lg">
+                        <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                          Select Model
+                        </div>
+                        {models.map((model) => (
+                          <button
+                            key={model}
+                            onClick={() => {
+                              handleModelChange(model);
+                              setIsModelDropdownOpen(false);
+                            }}
+                            className={cn(
+                              "w-full px-4 py-2 text-left text-sm transition-colors",
+                              selectedModel === model
+                                ? "text-[var(--text-primary)]"
+                                : "text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
+                            )}
+                          >
+                            {model}
+                          </button>
+                        ))}
+                        <div className="mt-2 border-t border-[var(--border-color)] pt-2">
+                          <button
+                            onClick={() => {
+                              setIsModelDropdownOpen(false);
+                              setIsSettingsOpen(true);
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+                          >
+                            Manage models
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 {input.trim() || pendingImage ? (
                   <button
                     onClick={() => void sendMessage()}

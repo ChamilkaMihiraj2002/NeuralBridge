@@ -1,0 +1,21 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="64" fill="#F7F9FC"/>
+  <rect x="18" y="18" width="220" height="220" rx="46" fill="url(#bg)"/>
+  <rect x="18.75" y="18.75" width="218.5" height="218.5" rx="45.25" stroke="#D9E0EA" stroke-width="1.5"/>
+  <circle cx="78" cy="128" r="28" fill="#0B57D0"/>
+  <circle cx="178" cy="128" r="28" fill="#D96570"/>
+  <rect x="89" y="120" width="78" height="16" rx="8" fill="url(#bridge)"/>
+  <circle cx="128" cy="128" r="12" fill="#1F1F1F"/>
+  <circle cx="78" cy="128" r="40" stroke="#0B57D0" stroke-opacity="0.16" stroke-width="12"/>
+  <circle cx="178" cy="128" r="40" stroke="#D96570" stroke-opacity="0.16" stroke-width="12"/>
+  <defs>
+    <linearGradient id="bg" x1="46" y1="34" x2="216" y2="228" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF3FA"/>
+    </linearGradient>
+    <linearGradient id="bridge" x1="89" y1="128" x2="167" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B57D0"/>
+      <stop offset="1" stop-color="#D96570"/>
+    </linearGradient>
+  </defs>
+</svg>
