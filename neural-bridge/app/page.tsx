@@ -5,7 +5,9 @@ import Image from "next/image";
 import {
   ArrowUp,
   Bot,
+  Check,
   CircleAlert,
+  Copy,
   Image as ImageIcon,
   Moon,
   Plus,
@@ -24,6 +26,10 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   images?: string[]; // Kept in memory but stripped on localstorage
+  responseTimeMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
 };
 
 type ChatSession = {
@@ -77,6 +83,32 @@ const suggestedModels = ["llama3.2:3b", "llama3.1:8b", "qwen2.5:7b", "mistral:7b
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function formatResponseTime(milliseconds: number) {
+  if (milliseconds < 1000) {
+    return `${Math.round(milliseconds)} ms`;
+  }
+
+  return `${(milliseconds / 1000).toFixed(2)} s`;
+}
+
+function formatTokenUsage(message: Message) {
+  const usageParts: string[] = [];
+
+  if (typeof message.promptTokens === "number") {
+    usageParts.push(`in ${message.promptTokens}`);
+  }
+
+  if (typeof message.completionTokens === "number") {
+    usageParts.push(`out ${message.completionTokens}`);
+  }
+
+  if (typeof message.totalTokens === "number") {
+    usageParts.push(`total ${message.totalTokens}`);
+  }
+
+  return usageParts.length > 0 ? usageParts.join(" • ") : null;
 }
 
 function TitleLogo({ compact = false }: { compact?: boolean }) {
@@ -136,13 +168,21 @@ function readStoredSettings() {
   }
 }
 
-function readStoredTheme(): ThemeMode {
+function readStoredTheme(): ThemeMode | null {
   try {
     const savedTheme = localStorage.getItem("neural_bridge_theme");
     if (savedTheme === "light" || savedTheme === "dark") {
       return savedTheme;
     }
   } catch {}
+
+  return null;
+}
+
+function getSystemTheme(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "light";
+  }
 
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
@@ -224,11 +264,55 @@ function renderInlineMarkdown(content: string) {
   });
 }
 
+function isMarkdownTableLine(line: string) {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && trimmed.replace(/^\||\|$/g, "").includes("|");
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const trimmed = line.trim();
+  if (!isMarkdownTableLine(trimmed)) {
+    return false;
+  }
+
+  return trimmed
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitMarkdownTableCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function renderParagraphLines(lines: string[], key: string) {
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return (
+    <p key={key} className="mb-3 whitespace-pre-wrap">
+      {lines.map((line, lineIndex) => (
+        <span key={lineIndex}>
+          {renderInlineMarkdown(line)}
+          {lineIndex < lines.length - 1 ? <br /> : null}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 const LANGUAGE_ALIASES: Record<string, string> = {
   js: "javascript",
   jsx: "javascript",
   ts: "typescript",
   tsx: "typescript",
+  md: "markdown",
+  mdx: "markdown",
   py: "python",
   sh: "bash",
   shell: "bash",
@@ -483,17 +567,42 @@ function tokenizeCode(content: string, language: string): SyntaxToken[] {
   return tokens.length > 0 ? tokens : [{ type: "plain", value: content }];
 }
 
-function renderMarkdown(content: string) {
+function renderMarkdown(
+  content: string,
+  options?: {
+    copiedCodeKey?: string | null;
+    onCopyCode?: (code: string, key: string) => void;
+  },
+) {
   const segments = parseMarkdownSegments(content);
 
   return segments.map((segment, segmentIndex) => {
     if (segment.type === "code") {
+      if (normalizeLanguage(segment.language) === "markdown") {
+        return (
+          <div key={segmentIndex} className="space-y-3">
+            {renderMarkdown(segment.content, options)}
+          </div>
+        );
+      }
+
       const tokens = tokenizeCode(segment.content, segment.language);
+      const codeKey = `${segment.language}:${segment.content}`;
+      const isCopied = options?.copiedCodeKey === codeKey;
 
       return (
         <div key={segmentIndex} className="markdown-code-block">
           <div className="markdown-code-header">
             <span>{segment.language || "code"}</span>
+            <button
+              type="button"
+              onClick={() => options?.onCopyCode?.(segment.content, codeKey)}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+              aria-label="Copy code block"
+            >
+              {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <span>{isCopied ? "Copied" : "Copy"}</span>
+            </button>
           </div>
           <pre>
             <code className="markdown-code">
@@ -517,6 +626,8 @@ function renderMarkdown(content: string) {
       .filter(Boolean);
 
     return blocks.map((block, blockIndex) => {
+      const lines = block.split("\n");
+
       if (block.startsWith("# ")) {
         return (
           <h1 key={`${segmentIndex}-${blockIndex}`} className="markdown-h1">
@@ -538,6 +649,41 @@ function renderMarkdown(content: string) {
           <h3 key={`${segmentIndex}-${blockIndex}`} className="markdown-h3">
             {renderInlineMarkdown(block.slice(4))}
           </h3>
+        );
+      }
+
+      const tableSeparatorIndex = lines.findIndex((line) => isMarkdownTableSeparator(line));
+      if (tableSeparatorIndex > 0 && isMarkdownTableLine(lines[tableSeparatorIndex - 1])) {
+        const introLines = lines.slice(0, tableSeparatorIndex - 1).filter((line) => line.trim().length > 0);
+        const headerCells = splitMarkdownTableCells(lines[tableSeparatorIndex - 1]);
+        const rowLines = lines
+          .slice(tableSeparatorIndex + 1)
+          .filter((line) => line.trim().length > 0 && isMarkdownTableLine(line));
+
+        return (
+          <div key={`${segmentIndex}-${blockIndex}`} className="space-y-3">
+            {renderParagraphLines(introLines, `${segmentIndex}-${blockIndex}-intro`)}
+            <div className="markdown-table-wrapper">
+              <table className="markdown-table">
+                <thead>
+                  <tr>
+                    {headerCells.map((cell, cellIndex) => (
+                      <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowLines.map((line, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {splitMarkdownTableCells(line).map((cell, cellIndex) => (
+                        <td key={cellIndex}>{renderInlineMarkdown(cell)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         );
       }
 
@@ -581,14 +727,7 @@ function renderMarkdown(content: string) {
       }
 
       return (
-        <p key={`${segmentIndex}-${blockIndex}`} className="mb-3 whitespace-pre-wrap">
-          {block.split("\n").map((line, lineIndex) => (
-            <span key={lineIndex}>
-              {renderInlineMarkdown(line)}
-              {lineIndex < block.split("\n").length - 1 ? <br /> : null}
-            </span>
-          ))}
-        </p>
+        renderParagraphLines(lines, `${segmentIndex}-${blockIndex}`)
       );
     });
   });
@@ -639,6 +778,9 @@ export default function ChatInterface() {
   const [ngrokUrl, setNgrokUrl] = useState(DEFAULT_URL);
   const [newModelInput, setNewModelInput] = useState("");
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [hasThemePreference, setHasThemePreference] = useState(false);
+  const [isClearHistoryConfirmOpen, setIsClearHistoryConfirmOpen] = useState(false);
+  const [copiedCodeKey, setCopiedCodeKey] = useState<string | null>(null);
 
   // Storage and Session State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -648,12 +790,14 @@ export default function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const notificationIdRef = useRef(0);
 
   const pushNotification = (message: string) => {
-    const id = notificationIdRef.current++;
+    let id = 0;
 
-    setNotifications((current) => [...current, { id, message }]);
+    setNotifications((current) => {
+      id = current.reduce((highestId, notification) => Math.max(highestId, notification.id), -1) + 1;
+      return [...current, { id, message }];
+    });
 
     window.setTimeout(() => {
       setNotifications((current) => current.filter((notification) => notification.id !== id));
@@ -662,6 +806,19 @@ export default function ChatInterface() {
 
   const dismissNotification = (id: number) => {
     setNotifications((current) => current.filter((notification) => notification.id !== id));
+  };
+
+  const copyCodeBlock = async (code: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCodeKey(key);
+      window.setTimeout(() => {
+        setCopiedCodeKey((current) => (current === key ? null : current));
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to copy code block", error);
+      pushNotification("Copy failed. Please try again.");
+    }
   };
 
   const calculateStorageUsage = () => {
@@ -713,7 +870,9 @@ export default function ChatInterface() {
       setModels(storedSettings.models);
       setNgrokUrl(storedSettings.url);
       setSelectedModel(storedSettings.selected);
-      setTheme(readStoredTheme());
+      const storedTheme = readStoredTheme();
+      setHasThemePreference(storedTheme !== null);
+      setTheme(storedTheme ?? getSystemTheme());
       
       try {
         const storedSessions = localStorage.getItem("neural_bridge_sessions");
@@ -735,9 +894,29 @@ export default function ChatInterface() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("neural_bridge_theme", theme);
-  }, [theme]);
+    if (hasThemePreference) {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem("neural_bridge_theme", theme);
+    } else {
+      delete document.documentElement.dataset.theme;
+      localStorage.removeItem("neural_bridge_theme");
+    }
+  }, [hasThemePreference, theme]);
+
+  useEffect(() => {
+    if (hasThemePreference) {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncTheme = (event: MediaQueryListEvent) => {
+      setTheme(event.matches ? "dark" : "light");
+    };
+
+    mediaQuery.addEventListener("change", syncTheme);
+
+    return () => mediaQuery.removeEventListener("change", syncTheme);
+  }, [hasThemePreference]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -894,6 +1073,7 @@ export default function ChatInterface() {
     setIsLoading(true);
 
     try {
+      const startedAt = performance.now();
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -911,7 +1091,26 @@ export default function ChatInterface() {
       }
 
       const data = await response.json();
-      const messagesWithReply = [...newMessages, data.message];
+      const elapsedMs = performance.now() - startedAt;
+      const ollamaDurationMs =
+        typeof data?.total_duration === "number" ? data.total_duration / 1_000_000 : undefined;
+      const promptTokens =
+        typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : undefined;
+      const completionTokens =
+        typeof data?.eval_count === "number" ? data.eval_count : undefined;
+      const assistantMessage: Message = {
+        role: data?.message?.role === "assistant" ? "assistant" : "assistant",
+        content: typeof data?.message?.content === "string" ? data.message.content : "",
+        ...(Array.isArray(data?.message?.images) ? { images: data.message.images } : {}),
+        responseTimeMs: ollamaDurationMs ?? elapsedMs,
+        promptTokens,
+        completionTokens,
+        totalTokens:
+          typeof promptTokens === "number" || typeof completionTokens === "number"
+            ? (promptTokens ?? 0) + (completionTokens ?? 0)
+            : undefined,
+      };
+      const messagesWithReply = [...newMessages, assistantMessage];
       setMessages(messagesWithReply);
       updateCurrentSession(messagesWithReply);
     } catch (error) {
@@ -994,24 +1193,27 @@ export default function ChatInterface() {
                     <div key={groupName} className="flex flex-col gap-0.5">
                       <p className="px-3 text-[11px] font-semibold text-[var(--text-tertiary)] mb-1 uppercase opacity-75">{groupName}</p>
                       {groupSessions.map((session) => (
-                        <div key={session.id} className="relative group/session flex items-center">
+                        <div key={session.id} className="group/session flex items-start gap-2">
                           <button
                             onClick={() => loadSession(session.id)}
                             className={cn(
-                              "flex-1 flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-[var(--text-secondary)] transition-colors text-left pr-8",
+                              "flex min-w-0 flex-1 items-start gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-[var(--text-secondary)] transition-colors",
                               currentSessionId === session.id ? "bg-[var(--accent-bg)] text-[var(--accent-color)] font-medium" : "hover:bg-[var(--bg-surface-hover)]"
                             )}
                           >
-                            <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                            <span className="truncate">{session.title}</span>
+                            <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80" />
+                            <span className="min-w-0 flex-1 break-words leading-5 line-clamp-2 sm:line-clamp-1">
+                              {session.title}
+                            </span>
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               deleteSession(session.id);
                             }}
-                            className="absolute right-2 p-1.5 opacity-0 group-hover/session:opacity-100 focus:opacity-100 text-[var(--text-tertiary)] hover:text-red-500 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-all"
+                            className="mt-1 shrink-0 rounded-md p-1.5 text-[var(--text-tertiary)] opacity-100 transition-all hover:bg-black/5 hover:text-red-500 focus:opacity-100 md:opacity-0 md:group-hover/session:opacity-100 dark:hover:bg-white/5"
                             title="Delete session"
+                            aria-label={`Delete ${session.title}`}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -1037,7 +1239,10 @@ export default function ChatInterface() {
               </button>
 
             <button
-              onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+              onClick={() => {
+                setHasThemePreference(true);
+                setTheme((current) => (current === "light" ? "dark" : "light"));
+              }}
               className="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -1141,8 +1346,24 @@ export default function ChatInterface() {
                           ) : null}
 
                           <div className={message.role === "assistant" ? "markdown-content" : ""}>
-                            {message.role === "assistant" ? renderMarkdown(message.content || " ") : message.content}
+                            {message.role === "assistant"
+                              ? renderMarkdown(message.content || " ", {
+                                  copiedCodeKey,
+                                  onCopyCode: copyCodeBlock,
+                                })
+                              : message.content}
                           </div>
+
+                          {message.role === "assistant" ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                              {typeof message.responseTimeMs === "number" ? (
+                                <span>{formatResponseTime(message.responseTimeMs)}</span>
+                              ) : null}
+                              {formatTokenUsage(message) ? (
+                                <span>{formatTokenUsage(message)}</span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ))}
@@ -1334,12 +1555,7 @@ export default function ChatInterface() {
                 </p>
                 
                 <button
-                  onClick={() => {
-                    const confirmed = window.confirm("Are you sure you want to clear all chat history?");
-                    if (confirmed) {
-                       clearChatHistory();
-                    }
-                  }}
+                  onClick={() => setIsClearHistoryConfirmOpen(true)}
                   className="w-full rounded-xl border border-red-500/30 bg-red-50/50 dark:bg-red-950/20 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 transition-colors"
                 >
                   Clear all local chat history
@@ -1440,6 +1656,41 @@ export default function ChatInterface() {
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isClearHistoryConfirmOpen && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm slide-in">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl">
+            <div className="border-b border-[var(--border-color)] px-5 py-4">
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Clear local chat history?</h3>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <p className="text-sm text-[var(--text-secondary)]">
+                This will permanently remove all saved chat sessions from this browser.
+              </p>
+              <p className="text-sm text-[var(--text-tertiary)]">
+                This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-[var(--border-color)] px-5 py-4">
+              <button
+                onClick={() => setIsClearHistoryConfirmOpen(false)}
+                className="rounded-xl border border-[var(--border-color)] px-4 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  clearChatHistory();
+                  setIsClearHistoryConfirmOpen(false);
+                }}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                Clear history
+              </button>
             </div>
           </div>
         </div>

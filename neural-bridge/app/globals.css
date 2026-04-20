@@ -34,6 +34,25 @@
   --shadow-elevation: 0px 1px 3px rgba(0,0,0,0.5), 0px 4px 6px rgba(0,0,0,0.3);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg-primary: #131314;
+    --bg-sidebar: #1e1f20;
+    --bg-surface: #1e1f20;
+    --bg-surface-hover: #333537;
+    --text-primary: #e3e3e3;
+    --text-secondary: #c4c7c5;
+    --text-tertiary: #8e918f;
+    --border-color: #444746;
+    --accent-color: #a8c7fa;
+    --accent-bg: #004a77;
+    --message-user-bg: #1e1f20;
+    --input-border: transparent;
+    --greeting-gradient: linear-gradient(74deg, #4285f4 0%, #9b72cb 9%, #d96570 20%, #d96570 24%, #9b72cb 35%, #4285f4 44%, #9b72cb 50%, #d96570 56%, #131314 75%, #131314 100%);
+    --shadow-elevation: 0px 1px 3px rgba(0,0,0,0.5), 0px 4px 6px rgba(0,0,0,0.3);
+  }
+}
+
 @theme inline {
   --color-background: var(--bg-primary);
   --color-foreground: var(--text-primary);
@@ -186,6 +205,42 @@ textarea {
 
 .markdown-content li {
   margin-bottom: 0.25rem;
+}
+
+.markdown-table-wrapper {
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 420px;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-table th {
+  background: color-mix(in srgb, var(--bg-surface-hover) 55%, var(--bg-surface));
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.markdown-table td {
+  color: var(--text-secondary);
+}
+
+.markdown-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .markdown-code-block {
