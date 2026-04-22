@@ -98,6 +98,8 @@ npm run lint
 - Uploaded images are sent with the current request but stripped before sessions are saved locally to avoid storage bloat.
 - The proxy route includes the `ngrok-skip-browser-warning` header for tunneled backend URLs.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1we2Nfh24ii0scECCEfbQowETzaHglP05?usp=sharing)
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
