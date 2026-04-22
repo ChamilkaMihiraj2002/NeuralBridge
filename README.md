@@ -100,6 +100,8 @@ npm run lint
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1we2Nfh24ii0scECCEfbQowETzaHglP05?usp=sharing)
 
+<img width="1697" height="943" alt="Screenshot 2026-04-22 at 10 06 24 AM" src="https://github.com/user-attachments/assets/3a332eaf-9793-4036-ba72-3eda301ce084" />
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
