@@ -10,7 +10,7 @@ NeuralBridge is a modern local AI chat workspace built with Next.js. It provides
 - Markdown rendering with code blocks, tables, lists, and copy actions
 - Persisted chat sessions in browser storage
 - Light and dark theme support
-- Next.js API route that proxies chat requests to an Ollama-compatible `/api/chat` endpoint
+- Server-side Modal authentication and chat, alongside Ollama support
 
 ## Tech Stack
 
@@ -59,7 +59,25 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Model Backend
+## Modal Backend
+
+Modal.com is the default provider. Copy `neural-bridge/.env.example` to
+`neural-bridge/.env.local` and set `MODAL_ENDPOINT`, `MODAL_KEY`, and
+`MODAL_SECRET`. Restart the development server after changing these values.
+For hosting, configure the same environment variables on your server.
+Keep credentials server-side and never commit `.env.local`.
+
+The server authenticates requests to `/v1/chat/completions` and discovers the
+model via `/v1/models`. Optionally set `MODAL_MODEL` to the exact served model ID
+to skip discovery. Conversation history, images, and token counts are supported;
+image support depends on the deployed model. Requests time out after 280 seconds.
+
+The chat API has no user authentication. Restrict access to the application or
+add authentication before publishing a deployment with server credentials.
+
+Select **Ollama** in Settings to use the existing backend URL and model picker.
+
+## Ollama Backend
 
 NeuralBridge sends chat requests through the Next.js API route at:
 

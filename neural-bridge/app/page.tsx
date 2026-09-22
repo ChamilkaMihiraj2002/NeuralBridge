@@ -133,7 +133,7 @@ function TitleLogo({ compact = false }: { compact?: boolean }) {
         </div>
         {!compact && (
           <div className="truncate text-[11px] uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
-            Local AI Workspace
+            AI Workspace
           </div>
         )}
       </div>
@@ -153,6 +153,7 @@ function readStoredSettings() {
         : [DEFAULT_MODEL];
 
     return {
+      provider: localStorage.getItem("neural_bridge_provider") === "ollama" ? "ollama" as const : "modal" as const,
       models: parsedModels as string[],
       url: savedUrl || DEFAULT_URL,
       selected: savedSelected || (parsedModels[0] as string),
@@ -160,6 +161,7 @@ function readStoredSettings() {
     };
   } catch {
     return {
+      provider: "modal" as const,
       models: [DEFAULT_MODEL],
       url: DEFAULT_URL,
       selected: DEFAULT_MODEL,
@@ -773,6 +775,7 @@ export default function ChatInterface() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
+  const [provider, setProvider] = useState<"modal" | "ollama">("modal");
   const [models, setModels] = useState<string[]>([DEFAULT_MODEL]);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [ngrokUrl, setNgrokUrl] = useState(DEFAULT_URL);
@@ -867,6 +870,7 @@ export default function ChatInterface() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const storedSettings = readStoredSettings();
+      setProvider(storedSettings.provider);
       setModels(storedSettings.models);
       setNgrokUrl(storedSettings.url);
       setSelectedModel(storedSettings.selected);
@@ -1078,6 +1082,7 @@ export default function ChatInterface() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          provider,
           url: ngrokUrl,
           model: selectedModel,
           messages: newMessages,
@@ -1449,11 +1454,12 @@ export default function ChatInterface() {
               <div className="shrink-0 pb-1.5 pr-1.5 flex items-center gap-2">
                 <div className="relative">
                   <button
+                    disabled={provider === "modal"}
                     onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                     className="flex h-9 items-center gap-2 rounded-full px-2 text-sm text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-surface-hover)]"
                     title="Select model"
                   >
-                    <span className="max-w-[120px] truncate">{selectedModel}</span>
+                    <span className="max-w-[120px] truncate">{provider === "modal" ? "Modal model" : selectedModel}</span>
                     <ChevronDown className="h-4 w-4 opacity-70" />
                   </button>
 
@@ -1516,7 +1522,7 @@ export default function ChatInterface() {
             </div>
             
             <p className="text-center text-[11px] text-[var(--text-tertiary)] mt-3">
-              Neural Bridge local model. Accuracy may vary.
+              Neural Bridge AI. Accuracy may vary.
             </p>
           </div>
         </div>
@@ -1565,6 +1571,22 @@ export default function ChatInterface() {
               <hr className="border-[var(--border-color)]" />
 
               <div className="space-y-3">
+                <label htmlFor="provider" className="block font-medium text-[var(--text-primary)]">Model provider</label>
+                <select id="provider" value={provider}
+                  onChange={(event) => {
+                    const next = event.target.value === "ollama" ? "ollama" : "modal";
+                    setProvider(next);
+                    setIsModelDropdownOpen(false);
+                    localStorage.setItem("neural_bridge_provider", next);
+                  }}
+                  className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)]">
+                  <option value="modal">Modal.com</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+                {provider === "modal" && <p className="text-sm text-[var(--text-tertiary)]">Uses the Modal endpoint and model configured on the server.</p>}
+              </div>
+
+              <div hidden={provider === "modal"} className="space-y-3">
                 <label className="block font-medium text-[var(--text-primary)]">
                   Backend API URL
                 </label>
@@ -1581,7 +1603,7 @@ export default function ChatInterface() {
                 />
               </div>
 
-              <div className="space-y-4">
+              <div hidden={provider === "modal"} className="space-y-4">
                 <div>
                   <h3 className="block font-medium text-[var(--text-primary)] mb-1">Local Models</h3>
                   <p className="text-sm text-[var(--text-tertiary)]">Manage models installed on your machine.</p>
